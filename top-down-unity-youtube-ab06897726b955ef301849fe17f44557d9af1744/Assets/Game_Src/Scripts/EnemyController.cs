@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class EnemyController : MonoBehaviour
@@ -6,18 +7,25 @@ public class EnemyController : MonoBehaviour
     [SerializeField] private float m_RotationSpeed = 8f;
     [SerializeField] private float m_StopDistance = 1.5f; // Distance at which the enemy stops following
 
+    [Header("Boids")]
+    [SerializeField] private float m_DetectionDistance = 1f;
+    [SerializeField] private float m_SeparationWeight = 2f;
+    [SerializeField] private float m_AlignmentWeight = 1.0f;
+    [SerializeField] private float m_CohesionWeight = 1.0f;
+
     private Animator m_Animator;
     private Transform m_Target;
 
     private Vector3 m_Direction = Vector3.zero;
     private Quaternion m_TargetRotation;
+    private Vector3 m_SeparationForce = Vector3.zero;
 
     private float m_MovementSpeedBlend;
 
     private void Awake()
     {
         m_Animator = GetComponent<Animator>();
-        m_Target = FindObjectOfType<PlayerController>().transform;
+        m_Target = FindFirstObjectByType<PlayerController>().transform;
     }
 
     void Update()
@@ -30,8 +38,21 @@ public class EnemyController : MonoBehaviour
 
     private void FollowTarget()
     {
-        m_Direction = (m_Target.position - transform.position).WithNewY(0);
-        float distance = m_Direction.magnitude;
+        Vector3 toTarget = (m_Target.position - transform.position).WithNewY(0);
+        float distance = toTarget.magnitude;
+
+        // Boids: se recalculan las fuerzas en cada frame
+        m_SeparationForce = Vector3.zero;
+        Collider[] neighbours = GetNeighbours();
+        if (neighbours.Length > 0)
+        {
+            CalculateSeparationForce(neighbours);
+            ApplyAllignment(neighbours);
+            ApplyCohesion(neighbours);
+        }
+
+        // Dirección final = hacia el jugador + fuerzas de boids
+        m_Direction = (toTarget.normalized + m_SeparationForce).WithNewY(0);
 
         if (distance > m_StopDistance)
         {
@@ -43,6 +64,70 @@ public class EnemyController : MonoBehaviour
         }
 
         RotateTowardsTarget();
+    }
+
+    private Collider[] GetNeighbours()
+    {
+        int enemyMask = LayerMask.GetMask("Enemy");
+        Collider[] hits = Physics.OverlapSphere(transform.position, m_DetectionDistance, enemyMask);
+
+        // Se excluye a sí mismo
+        List<Collider> others = new List<Collider>();
+        for (int i = 0; i < hits.Length; i++)
+        {
+            if (hits[i].transform != transform)
+            {
+                others.Add(hits[i]);
+            }
+        }
+        return others.ToArray();
+    }
+
+    // Step 2: separación
+    private void CalculateSeparationForce(Collider[] neighbours)
+    {
+        foreach (Collider neighbour in neighbours)
+        {
+            Vector3 away = transform.position - neighbour.transform.position;
+            float distance = away.magnitude;
+
+            if (distance > 0)
+            {
+                m_SeparationForce += (away / distance) * m_SeparationWeight;
+            }
+        }
+    }
+
+    // Step 3: alineamiento
+    private void ApplyAllignment(Collider[] neighbours)
+    {
+        Vector3 neighboursForward = Vector3.zero;
+        foreach (Collider neighbour in neighbours)
+        {
+            neighboursForward += neighbour.transform.forward;
+        }
+
+        if (neighboursForward != Vector3.zero)
+        {
+            neighboursForward.Normalize();
+        }
+
+        m_SeparationForce += neighboursForward * m_AlignmentWeight;
+    }
+
+    // Step 4: cohesión
+    private void ApplyCohesion(Collider[] neighbours)
+    {
+        Vector3 averagePosition = Vector3.zero;
+        foreach (Collider neighbour in neighbours)
+        {
+            averagePosition += neighbour.transform.position;
+        }
+
+        averagePosition /= neighbours.Length;
+        Vector3 cohesionDir = (averagePosition - transform.position).normalized;
+
+        m_SeparationForce += cohesionDir * m_CohesionWeight;
     }
 
     private void MoveTowardsTarget()
@@ -62,6 +147,8 @@ public class EnemyController : MonoBehaviour
 
     private void RotateTowardsTarget()
     {
+        if (m_Direction == Vector3.zero) return;
+
         m_TargetRotation = Quaternion.LookRotation(m_Direction);
         transform.rotation = Quaternion.Slerp(transform.rotation, m_TargetRotation, Time.deltaTime * m_RotationSpeed);
     }

@@ -145,7 +145,7 @@ public class FlockUnit : MonoBehaviour
 	{
 		var avoidanceVector = Vector3.zero;
 		if (avoidanceNeighbours.Count == 0)
-   			return Vector3.zero;
+    		return Vector3.zero;
 		int neighboursInFOV = 0;
 		for (int i = 0; i < avoidanceNeighbours.Count; i++)
 		{
